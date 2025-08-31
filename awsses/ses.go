@@ -15,8 +15,18 @@ import (
 
 var _ email.Sender = &AWSSESSender{}
 
+type SESClient interface {
+	SendEmail(ctx context.Context, params *sesv2.SendEmailInput, optFns ...func(*sesv2.Options)) (*sesv2.SendEmailOutput, error)
+}
+
 type AWSSESSender struct {
-	sesClient *sesv2.Client
+	sesClient SESClient
+}
+
+func NewAWSSESSender(client SESClient) *AWSSESSender {
+	return &AWSSESSender{
+		sesClient: client,
+	}
 }
 
 func (a *AWSSESSender) SendEmail(ctx context.Context, e email.Email) error {
