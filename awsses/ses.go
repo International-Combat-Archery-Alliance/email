@@ -41,7 +41,8 @@ func (a *AWSSESSender) SendEmail(ctx context.Context, e email.Email) error {
 					Html: htmlContentFromEmail(e),
 					Text: textContentFromEmail(e),
 				},
-				Subject: utf8Content(e.Subject),
+				Subject:     utf8Content(e.Subject),
+				Attachments: attachmentsToAWS(e.Attachments),
 			},
 		},
 		Destination: &types.Destination{
@@ -58,6 +59,26 @@ func (a *AWSSESSender) SendEmail(ctx context.Context, e email.Email) error {
 	}
 
 	return nil
+}
+
+func attachmentsToAWS(attachments []email.Attachment) []types.Attachment {
+	awsAttachments := make([]types.Attachment, len(attachments))
+
+	for i, a := range attachments {
+		awsAttachments[i] = attachmentToAWS(a)
+	}
+
+	return awsAttachments
+}
+
+func attachmentToAWS(attachment email.Attachment) types.Attachment {
+	return types.Attachment{
+		FileName:           aws.String(attachment.FileName),
+		RawContent:         attachment.Content,
+		ContentType:        aws.String(attachment.ContentType),
+		ContentDescription: aws.String(attachment.Description),
+		ContentDisposition: types.AttachmentContentDispositionAttachment,
+	}
 }
 
 func htmlContentFromEmail(e email.Email) *types.Content {

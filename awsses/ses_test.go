@@ -76,6 +76,62 @@ func TestSendEmail_Success(t *testing.T) {
 				TextBody:         "Hello World",
 			},
 		},
+		{
+			name: "valid email with single attachment",
+			email: email.Email{
+				FromAddress: "sender@example.com",
+				ToAddresses: []string{"recipient@example.com"},
+				Subject:     "Test Subject",
+				TextBody:    "Hello World",
+				Attachments: []email.Attachment{
+					{
+						FileName:    "document.pdf",
+						Content:     []byte("fake pdf content"),
+						Description: "Test PDF document",
+						ContentType: "application/pdf",
+					},
+				},
+			},
+		},
+		{
+			name: "valid email with multiple attachments",
+			email: email.Email{
+				FromAddress: "sender@example.com",
+				ToAddresses: []string{"recipient@example.com"},
+				Subject:     "Test Subject",
+				HTMLBody:    "<h1>Hello World</h1>",
+				Attachments: []email.Attachment{
+					{
+						FileName:    "document.pdf",
+						Content:     []byte("fake pdf content"),
+						Description: "Test PDF document",
+						ContentType: "application/pdf",
+					},
+					{
+						FileName:    "image.jpg",
+						Content:     []byte("fake image content"),
+						Description: "Test image",
+						ContentType: "image/jpeg",
+					},
+					{
+						FileName:    "data.txt",
+						Content:     []byte("some text data"),
+						Description: "Text file",
+						ContentType: "text/plain",
+					},
+				},
+			},
+		},
+		{
+			name: "valid email with empty attachments slice",
+			email: email.Email{
+				FromAddress: "sender@example.com",
+				ToAddresses: []string{"recipient@example.com"},
+				Subject:     "Test Subject",
+				TextBody:    "Hello World",
+				Attachments: []email.Attachment{},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -93,6 +149,31 @@ func TestSendEmail_Success(t *testing.T) {
 						t.Errorf("expected Subject %s, got %v", tt.email.Subject, params.Content.Simple.Subject.Data)
 					}
 
+					// Verify attachments are properly converted
+					if len(params.Content.Simple.Attachments) != len(tt.email.Attachments) {
+						t.Errorf("expected %d attachments, got %d", len(tt.email.Attachments), len(params.Content.Simple.Attachments))
+					}
+
+					for i, attachment := range params.Content.Simple.Attachments {
+						if i >= len(tt.email.Attachments) {
+							break
+						}
+						expectedAttachment := tt.email.Attachments[i]
+
+						if attachment.FileName == nil || *attachment.FileName != expectedAttachment.FileName {
+							t.Errorf("expected attachment[%d] FileName %s, got %v", i, expectedAttachment.FileName, attachment.FileName)
+						}
+						if attachment.ContentType == nil || *attachment.ContentType != expectedAttachment.ContentType {
+							t.Errorf("expected attachment[%d] ContentType %s, got %v", i, expectedAttachment.ContentType, attachment.ContentType)
+						}
+						if attachment.ContentDescription == nil || *attachment.ContentDescription != expectedAttachment.Description {
+							t.Errorf("expected attachment[%d] ContentDescription %s, got %v", i, expectedAttachment.Description, attachment.ContentDescription)
+						}
+						if string(attachment.RawContent) != string(expectedAttachment.Content) {
+							t.Errorf("expected attachment[%d] RawContent %s, got %s", i, string(expectedAttachment.Content), string(attachment.RawContent))
+						}
+					}
+
 					return &sesv2.SendEmailOutput{}, nil
 				},
 			}
@@ -102,6 +183,116 @@ func TestSendEmail_Success(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAttachmentConversion(t *testing.T) {
+	tests := []struct {
+		name        string
+		attachments []email.Attachment
+	}{
+		{
+			name: "single attachment conversion",
+			attachments: []email.Attachment{
+				{
+					FileName:    "test.pdf",
+					Content:     []byte("test content"),
+					Description: "Test document",
+					ContentType: "application/pdf",
+				},
+			},
+		},
+		{
+			name: "multiple attachments conversion",
+			attachments: []email.Attachment{
+				{
+					FileName:    "document.pdf",
+					Content:     []byte("pdf content"),
+					Description: "PDF document",
+					ContentType: "application/pdf",
+				},
+				{
+					FileName:    "spreadsheet.xlsx",
+					Content:     []byte("excel content"),
+					Description: "Excel spreadsheet",
+					ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+				},
+				{
+					FileName:    "photo.png",
+					Content:     []byte("image content"),
+					Description: "Photo attachment",
+					ContentType: "image/png",
+				},
+			},
+		},
+		{
+			name:        "empty attachments",
+			attachments: []email.Attachment{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testEmail := email.Email{
+				FromAddress: "sender@example.com",
+				ToAddresses: []string{"recipient@example.com"},
+				Subject:     "Test Subject",
+				TextBody:    "Test body",
+				Attachments: tt.attachments,
+			}
+
+			client := &mockSESClient{
+				sendEmailFunc: func(ctx context.Context, params *sesv2.SendEmailInput, optFns ...func(*sesv2.Options)) (*sesv2.SendEmailOutput, error) {
+					// Verify attachment count
+					if len(params.Content.Simple.Attachments) != len(tt.attachments) {
+						t.Errorf("expected %d attachments, got %d", len(tt.attachments), len(params.Content.Simple.Attachments))
+						return &sesv2.SendEmailOutput{}, nil
+					}
+
+					// Verify each attachment is converted correctly
+					for i, awsAttachment := range params.Content.Simple.Attachments {
+						expectedAttachment := tt.attachments[i]
+
+						if awsAttachment.FileName == nil {
+							t.Errorf("attachment[%d] FileName is nil", i)
+							continue
+						}
+						if *awsAttachment.FileName != expectedAttachment.FileName {
+							t.Errorf("attachment[%d] FileName: expected %s, got %s", i, expectedAttachment.FileName, *awsAttachment.FileName)
+						}
+
+						if awsAttachment.ContentType == nil {
+							t.Errorf("attachment[%d] ContentType is nil", i)
+							continue
+						}
+						if *awsAttachment.ContentType != expectedAttachment.ContentType {
+							t.Errorf("attachment[%d] ContentType: expected %s, got %s", i, expectedAttachment.ContentType, *awsAttachment.ContentType)
+						}
+
+						if awsAttachment.ContentDescription == nil {
+							t.Errorf("attachment[%d] ContentDescription is nil", i)
+							continue
+						}
+						if *awsAttachment.ContentDescription != expectedAttachment.Description {
+							t.Errorf("attachment[%d] ContentDescription: expected %s, got %s", i, expectedAttachment.Description, *awsAttachment.ContentDescription)
+						}
+
+						if string(awsAttachment.RawContent) != string(expectedAttachment.Content) {
+							t.Errorf("attachment[%d] RawContent: expected %s, got %s", i, string(expectedAttachment.Content), string(awsAttachment.RawContent))
+						}
+					}
+
+					return &sesv2.SendEmailOutput{}, nil
+				},
+			}
+
+			sender := NewAWSSESSender(client)
+			err := sender.SendEmail(context.Background(), testEmail)
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
